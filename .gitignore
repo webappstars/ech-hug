@@ -1,0 +1,20 @@
+# Docker
+Dockerfile.local
+*.swp
+
+# Logs
+logs
+*.log
+
+# Temp files
+*.tmp
+*.temp
+
+# Binaries downloaded by the script
+ech-server-linux
+opera-linux
+cloudflared-linux
+
+# OS generated files
+.DS_Store
+Thumbs.db
