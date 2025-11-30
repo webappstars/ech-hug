@@ -5,9 +5,8 @@ FROM debian:latest
 WORKDIR /app
 
 # 安裝必要的套件：bash 和 curl
-RUN apt-get update && \
-    apt-get install -y curl && \
-    rm -rf /var/lib/apt/lists/*
+RUN apt-get update &&\
+    apt-get install -y curl
 
 # 設定環境變數的預設值，這些變數對應腳本的配置
 # 注意：WSPORT 預設為空，在 start.sh 中會檢查並隨機分配
