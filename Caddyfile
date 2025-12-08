@@ -1,0 +1,11 @@
+:{$WSPORT} {
+
+    # Hello World 静态页
+    root * /srv
+    file_server
+
+    # /ech/* 反代到 echserver
+    handle_path /ech/* {
+        reverse_proxy 127.0.0.1:{$ECHPORT}
+    }
+}
