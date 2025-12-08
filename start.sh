@@ -3,17 +3,13 @@ set -e
 
 # 獲取一個隨機端口
 get_free_port() {
-    # 選擇高端口號以避免衝突
     echo $(( ( RANDOM % 20000 ) + 10000 ))
 }
 
-# 執行核心服務啟動邏輯
 quicktunnel() {
-    # --- START: 強制 DNS 設定 ---
     echo "--- 正在強制設定 DNS 為 1.1.1.1/1.0.0.1 ---"
     echo "nameserver 1.1.1.1" > /etc/resolv.conf
     echo "nameserver 1.0.0.1" >> /etc/resolv.conf
-    # --- END: 強制 DNS 設定 ---
 
     echo "--- 正在下載服務二進制文件 ---"
 
@@ -46,7 +42,6 @@ quicktunnel() {
             ;;
     esac
 
-    # 下载（失败则退出）
     curl -fL "$ECH_URL" -o ech-server-linux
     curl -fL "$OPERA_URL" -o opera-linux
     curl -fL "$CLOUDFLARED_URL" -o cloudflared-linux
@@ -57,9 +52,9 @@ quicktunnel() {
 
     echo "--- 啟動服務 ---"
 
-    # 0. 端口分配：
-    #   Caddy 端口 = WSPORT
-    #   ECH 端口   = WSPORT + 1
+    # 端口分配：
+    # Caddy = WSPORT
+    # ECH   = WSPORT + 1
     if [ -z "$WSPORT" ]; then
         WSPORT=$(get_free_port)
         echo "WSPORT 未設置，自動選取給 Caddy 的端口: $WSPORT"
@@ -71,7 +66,7 @@ quicktunnel() {
     export WSPORT ECHPORT
     echo "ECH Server 將使用端口: $ECHPORT"
 
-    # 1. 啟動 Opera Proxy (如果 $OPERA=1)
+    # 1) Opera Proxy
     if [ "$OPERA" = "1" ]; then
         operaport=$(get_free_port)
         echo "啟動 Opera Proxy (port: $operaport, country: $COUNTRY_UPPER)..."
@@ -83,7 +78,7 @@ quicktunnel() {
         OPERA_PID=$!
     fi
 
-    # 2. 啟動 ECH Server（监听 ECHPORT）
+    # 2) ECH Server
     sleep 1
 
     ECH_ARGS=(./ech-server-linux -l "ws://0.0.0.0:$ECHPORT")
@@ -103,11 +98,9 @@ quicktunnel() {
     nohup "${ECH_ARGS[@]}" > /dev/null 2>&1 &
     ECH_PID=$!
 
-    # 3. 啟動 Cloudflared Tunnel（反代到 ECHPORT）
+    # 3) Cloudflared -> ECHPORT
     metricsport=$(get_free_port)
     echo "啟動 Cloudflared Tunnel (metrics port: $metricsport)..."
-
-    # update 失败不致命
     ./cloudflared-linux update > /dev/null 2>&1 || true
 
     nohup ./cloudflared-linux \
@@ -118,7 +111,7 @@ quicktunnel() {
         > /dev/null 2>&1 &
     CF_PID=$!
 
-    # 4. 獲取 Argo Hostname
+    # 4) 获取 Argo 域名
     while true; do
         echo "正在嘗試獲取 Argo 域名..."
         RESP=$(curl -s "http://127.0.0.1:$metricsport/metrics" || true)
@@ -127,27 +120,26 @@ quicktunnel() {
             echo "獲取成功，正在解析..."
             DOMAIN=$(echo "$RESP" | grep 'userHostname="' | sed -E 's/.*userHostname="https?:\/\/([^"]+)".*/\1/')
 
-            echo "--- 服務啟動成功 ---"
+            echo "--- ECH + Cloudflared 啟動成功 ---"
             if [ -z "$TOKEN" ]; then
                 echo "未設置 token, 連接為: $DOMAIN:443"
             else
                 echo "已設置 token, 連接為: $DOMAIN:443 （token 不顯示）"
             fi
-            echo "您可以透過日誌或 Docker inspect 查找連接信息。"
             break
         else
             echo "未獲取到 userHostname，5秒後重試..."
             sleep 5
         fi
     done
-
-    echo "--- 保持容器運行 ---"
-    tail -f /dev/null
 }
 
-# 根據傳入的參數執行對應模式
-if [ "$1" == "1" ]; then
-    # 檢查並處理 Opera 模式的設定
+# ---------------- main ----------------
+
+MODE="${1:-1}"  # 默认模式 1
+
+if [ "$MODE" = "1" ]; then
+    # Opera 参数检查
     if [ "$OPERA" = "1" ]; then
         echo "已啟用 Opera 前置代理。"
         COUNTRY=${COUNTRY:-AM}
@@ -157,11 +149,11 @@ if [ "$1" == "1" ]; then
             exit 1
         fi
     elif [ "$OPERA" != "0" ]; then
-        echo "錯誤：OPERA 變數只能是 0 (不啟用) 或 1 (啟用)。目前值: $OPERA"
+        echo "錯誤：OPERA 變數只能是 0 或 1。目前值: $OPERA"
         exit 1
     fi
 
-    # 檢查並處理 IP 模式的設定
+    # IPS 参数检查
     if [ "$IPS" != "4" ] && [ "$IPS" != "6" ]; then
         echo "錯誤：IPS 變數只能是 4 或 6。目前值: $IPS"
         exit 1
@@ -169,6 +161,10 @@ if [ "$1" == "1" ]; then
 
     quicktunnel
 else
-    echo "使用非預期模式啟動。請參閱 Dockerfile。"
+    echo "使用非預期模式啟動。"
     exit 1
 fi
+
+echo "--- 啟動 Caddy 前台服務（port: $WSPORT）---"
+# 最后用 exec 让 caddy 占据 PID1，容器不会退出
+exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
