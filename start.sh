@@ -1,6 +1,17 @@
 #!/bin/bash
 set -e
 
+# Hugging Face Spaces (Docker) 专用版
+# 关键适配：
+# 1) 默认 WSPORT=7860（HF 只路由 app_port=7860）
+# 2) trycloudflare 域名获取超时不 exit，避免 HF 判定启动失败而 Pause
+# 3) 其余逻辑保持你现有增强版（空闲端口、DNS保护、trap 清理、固定/随机隧道）
+
+# ---------------- HF required defaults ----------------
+MODE="${1:-1}"              # 默认模式 1
+WSPORT=${WSPORT:-7860}      # HF 外部必须能访问 7860
+export WSPORT
+
 # ---------------- utils ----------------
 
 # 获取一个“尽量空闲”的随机端口（最多尝试 20 次）
@@ -117,17 +128,11 @@ quicktunnel() {
     echo "--- 啟動服務 ---"
 
     # 端口分配：
-    # Caddy = WSPORT
+    # Caddy = WSPORT (HF 固定 7860)
     # ECH   = WSPORT + 1
-    if [ -z "$WSPORT" ]; then
-        WSPORT=$(get_free_port)
-        echo "WSPORT 未設置，自動選取給 Caddy 的端口: $WSPORT"
-    else
-        echo "使用自定義 WSPORT 給 Caddy: $WSPORT"
-    fi
-
+    echo "使用 WSPORT 給 Caddy: $WSPORT"
     ECHPORT=$((WSPORT + 1))
-    export WSPORT ECHPORT
+    export ECHPORT
     echo "ECH Server 將使用端口: $ECHPORT"
 
     # 1) Opera Proxy
@@ -177,6 +182,7 @@ quicktunnel() {
             echo "ERROR: cloudflared 固定隧道(JSON) 啟動失敗（無日志輸出）"
             exit 1
         fi
+        echo "固定隧道域名: ${ARGO_DOMAIN}:443"
 
     elif [[ "$ARGO_MODE" = "token" ]]; then
         echo "--- 使用固定 Tunnel(Token) 配置啟動 Cloudflared（后台静默）---"
@@ -188,6 +194,7 @@ quicktunnel() {
             echo "ERROR: cloudflared 固定隧道(Token) 啟動失敗（無日志輸出）"
             exit 1
         fi
+        echo "固定隧道域名: ${ARGO_DOMAIN}:443"
 
     else
         echo "--- 使用臨時 TryCloudflare 隧道啟動 Cloudflared ---"
@@ -199,8 +206,9 @@ quicktunnel() {
             > argo.log 2>&1 &
         CF_PID=$!
 
-        # 从 argo.log 读取域名并前台显示（加超时避免死循环）
-        local max_tries=60
+        # 从 argo.log 读取域名并前台显示
+        # HF 专用：超时不退出，避免 Space Pause
+        local max_tries=300  # 10 分钟
         local tries=0
         while true; do
             ARGO_DOMAIN=$(grep -oE "https://[a-zA-Z0-9.-]+trycloudflare\.com" argo.log \
@@ -218,10 +226,10 @@ quicktunnel() {
 
             tries=$((tries+1))
             if [[ $tries -ge $max_tries ]]; then
-                echo "ERROR: 2分鐘內未獲取到 trycloudflare 域名"
+                echo "WARN: 10分鐘內未獲取到 trycloudflare 域名，继续启动前台服务以满足 HF 健康检查"
                 echo "--- argo.log 最後 50 行 ---"
                 tail -n 50 argo.log || true
-                exit 1
+                break
             fi
 
             echo "未獲取到 trycloudflare 域名，2秒後重試..."
@@ -231,8 +239,6 @@ quicktunnel() {
 }
 
 # ---------------- main ----------------
-
-MODE="${1:-1}"  # 默认模式 1
 
 if [ "$MODE" = "1" ]; then
     # Opera 参数检查
@@ -249,7 +255,7 @@ if [ "$MODE" = "1" ]; then
         exit 1
     fi
 
-    # IPS 参数检查
+    # IPS 参数检查（HF 默认 ENV 里已给 IPS=4，可覆盖）
     if [ "$IPS" != "4" ] && [ "$IPS" != "6" ]; then
         echo "錯誤：IPS 變數只能是 4 或 6。目前值: $IPS"
         exit 1
