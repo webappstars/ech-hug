@@ -19,33 +19,31 @@ case "$ARCH" in
     ECH_URL="https://github.com/webappstars/ech-hug/releases/download/3.0/ech-tunnel-linux-arm64"
     ;;
   *)
-    echo "不支持架构: $ARCH"
+    echo "不支持架构: $ARCH" >&2
     exit 1
     ;;
 esac
 
-echo "--- Download ECH ---"
-curl -fL "$ECH_URL" -o /app/ech-server-linux
+# 静默下载：不显示进度、不打印成功信息
+curl -fsSL "$ECH_URL" -o /app/ech-server-linux
 chmod +x /app/ech-server-linux
 
-echo "--- Start ECH (port: $ECHPORT) ---"
+# 后台启动 ECH，日志写入 ech.log，不输出到前台
 ECH_ARGS=(/app/ech-server-linux -l "ws://0.0.0.0:$ECHPORT")
 if [ -n "$TOKEN" ]; then
   ECH_ARGS+=(-token "$TOKEN")
-  echo "ECH token enabled"
 fi
 
-# 后台跑 ECH
 nohup "${ECH_ARGS[@]}" > /app/ech.log 2>&1 &
 ECH_PID=$!
 
-# 简单存活检查
+# 存活检查（失败时才输出错误）
 sleep 1
 if ! kill -0 "$ECH_PID" 2>/dev/null; then
-  echo "ERROR: ECH 启动失败"
-  tail -n 50 /app/ech.log || true
+  echo "ERROR: ECH 启动失败" >&2
+  tail -n 50 /app/ech.log >&2 || true
   exit 1
 fi
 
-echo "--- Start Caddy (port: $WSPORT) ---"
+# 前台启动 Caddy（HF 需要 7860 上有服务）
 exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
