@@ -8,7 +8,7 @@ on:
       - 'app.js'
       - 'package.json'
   pull_request:
-    branches: [ main ]
+    branches: [ Hugging Face ]
   workflow_dispatch:
 
 jobs:
