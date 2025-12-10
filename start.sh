@@ -6,7 +6,26 @@ WSPORT=${WSPORT:-7860}
 ECHPORT=$((WSPORT + 1))
 export WSPORT ECHPORT
 
-# 下载 ech 二进制（按架构）
+# -------- DNS 强制（静默 + 失败不退出）--------
+# 目标：尽量写入 1.1.1.1/1.0.0.1
+# 行为：可写才改；先备份；失败回滚；全程不打印成功日志
+if [ -e /etc/resolv.conf ] && [ -w /etc/resolv.conf ]; then
+  if cp /etc/resolv.conf /etc/resolv.conf.bak 2>/dev/null; then
+    {
+      echo "nameserver 1.1.1.1"
+      echo "nameserver 1.0.0.1"
+    } > /etc/resolv.conf 2>/dev/null || {
+      echo "WARN: DNS 強制設定失敗，已還原。" >&2
+      mv /etc/resolv.conf.bak /etc/resolv.conf 2>/dev/null || true
+    }
+  else
+    echo "WARN: 無法備份 resolv.conf，跳過 DNS 強制設定。" >&2
+  fi
+else
+  echo "WARN: /etc/resolv.conf 不可寫或不存在，跳過 DNS 強制設定。" >&2
+fi
+
+# -------- 下载 ECH（二进制静默）--------
 ARCH=$(uname -m)
 case "$ARCH" in
   x86_64|x64|amd64)
@@ -24,11 +43,10 @@ case "$ARCH" in
     ;;
 esac
 
-# 静默下载：不显示进度、不打印成功信息
 curl -fsSL "$ECH_URL" -o /app/ech-server-linux
 chmod +x /app/ech-server-linux
 
-# 后台启动 ECH，日志写入 ech.log，不输出到前台
+# -------- 启动 ECH（后台静默）--------
 ECH_ARGS=(/app/ech-server-linux -l "ws://0.0.0.0:$ECHPORT")
 if [ -n "$TOKEN" ]; then
   ECH_ARGS+=(-token "$TOKEN")
@@ -37,7 +55,7 @@ fi
 nohup "${ECH_ARGS[@]}" > /app/ech.log 2>&1 &
 ECH_PID=$!
 
-# 存活检查（失败时才输出错误）
+# 存活检查（失败才输出）
 sleep 1
 if ! kill -0 "$ECH_PID" 2>/dev/null; then
   echo "ERROR: ECH 启动失败" >&2
@@ -45,5 +63,5 @@ if ! kill -0 "$ECH_PID" 2>/dev/null; then
   exit 1
 fi
 
-# 前台启动 Caddy（HF 需要 7860 上有服务）
+# -------- 前台启动 Caddy（HF 健康检查依赖 7860）--------
 exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
