@@ -1,18 +1,22 @@
 name: "Build and push images"
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - Hugging-Face          # 这里的 main 是你想要监听的分支名
+         # 也可以使用通配符监听所有 release/ 开头的分支
+  workflow_dispatch:  # 保留手动触发按钮
 
 jobs:
   Building:
-      runs-on: ubuntu-latest
-      name: "Build Argo-X images"
-      env:
-        DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-        DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-        DOCKERHUB_REPOSITORY: ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPO }}:latest
+    runs-on: ubuntu-latest
+    name: "Build Argo-X images"
+    env:
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+      DOCKERHUB_REPOSITORY: ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPO }}:latest
 
-      steps:
+    steps:
       - name: Checkout code
         uses: actions/checkout@v4.0.0
         with:
